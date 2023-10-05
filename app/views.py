@@ -1,102 +1,74 @@
-from django.shortcuts import get_object_or_404
-from django.http import JsonResponse
+from django.contrib.auth import login
+from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
+from django.contrib.auth.views import LoginView
+from django.shortcuts import render, redirect
+
+from django.contrib.auth.decorators import login_required
+
+from django.db.models import Count, Sum, Case, When, F, Value, IntegerField
+from django.urls import reverse_lazy
+from django.views.generic import CreateView
+
 from .models import *
-from django.db.models import Sum, Count, F, FloatField, ExpressionWrapper
 
 
-def get_lessons_by_user_and_product(request):
-    if request.method == 'GET':
-        user_id = request.GET.get('пользователь_id')
-        # Найдем все продукты, к которым у пользователя есть доступ
-        products = Product.objects.filter(productaccess__пользователь_id=user_id)
-        # Получим все уроки, связанные с этими продуктами
-        lessons = Lesson.objects.filter(продукты__in=products)
-        # Посчитаем общее время просмотра уроков для пользователя
-        total_time_watched = LessonView.objects.filter(
-            пользователь_id=user_id, статус='Просмотрено').aggregate(
-            total_time=Sum('время_просмотра'))['total_time']
-        # Создадим список уроков с информацией о статусе и времени просмотра
-        lessons_info = []
-        for lesson in lessons:
-            lesson_view = LessonView.objects.filter(
-                пользователь_id=user_id, урок=lesson).first()
-            if lesson_view:
-                status = lesson_view.статус
-                time_watched = lesson_view.время_просмотра
-                last_viewed_date = lesson_view.дата_просмотра.strftime('%Y-%m-%d %H:%M:%S')
-            else:
-                status = 'Не просмотрено'
-                time_watched = 0
-                last_viewed_date = 'Нет данных'
-            lessons_info.append({
-                'название': lesson.название,
-                'ссылка_на_видео': lesson.ссылка_на_видео,
-                'длительность_урока': lesson.длительность,
-                'статус': status,
-                'время_просмотра': time_watched,
-                'дата_последнего_просмотра': last_viewed_date
-            })
-        response_data = {
-            'lessons': lessons_info,
-            'общее_время_просмотра': total_time_watched if total_time_watched else 0
-        }
-        return JsonResponse(response_data)
-    else:
-        JsonResponse({'message': 'Not Get request'})
+# декоратор для проверки авторизации
+def authentication_required(view_func):
+    def wrapped_view(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return redirect('login')
+        return view_func(request, *args, **kwargs)
+
+    return wrapped_view
 
 
-def get_lessons_by_user_and_product(request):
-    if request.method == 'GET':
-        user_id = request.GET.get('пользователь_id')
-        product_id = request.GET.get('продукт_id')
-        product = get_object_or_404(Product, id=product_id)
-        if product.productaccess_set.filter(пользователь_id=user_id).exists():
-            lessons = Lesson.objects.filter(продукты=product)
-            lessons_info = []
-            for lesson in lessons:
-                lesson_view = LessonView.objects.filter(
-                    пользователь_id=user_id, урок=lesson).first()
-                if lesson_view:
-                    status = lesson_view.статус
-                    time_watched = lesson_view.время_просмотра
-                    last_viewed_date = lesson_view.дата_просмотра.strftime('%Y-%m-%d %H:%M:%S')
-                else:
-                    status = 'Не просмотрено'
-                    time_watched = 0
-                    last_viewed_date = 'Нет данных'
-                lessons_info.append({
-                    'название': lesson.название,
-                    'ссылка_на_видео': lesson.ссылка_на_видео,
-                    'длительность_урока': lesson.длительность,
-                    'статус': status,
-                    'время_просмотра': time_watched,
-                    'дата_последнего_просмотра': last_viewed_date
-                })
-            return JsonResponse({'lessons': lessons_info})
-        else:
-            return JsonResponse({'message': 'У вас нет доступа к данному продукту'}, status=403)
+@authentication_required
+def lesson_list(request):
+    user = request.user
+    lesson_views = LessonView.objects.filter(user=user)
+    return render(request, 'lesson_list.html', {'lesson_views': lesson_views})
 
 
-def get_product_stats(request):
-    if request.method == 'GET':
-        products = Product.objects.all()
-        product_stats = []
-        for product in products:
-            lesson_views = LessonView.objects.filter(
-                урок__продукты=product, статус='Просмотрено')
-            total_lessons_watched = lesson_views.count()
-            total_time_watched = lesson_views.aggregate(
-                total_time=Sum('время_просмотра'))['total_time']
-            total_users = product.productaccess_set.count()
-            if total_users > 0:
-                acquisition_percentage = total_lessons_watched / total_users * 100
-            else:
-                acquisition_percentage = 0
-            product_stats.append({
-                'название_продукта': product.название,
-                'количество_просмотренных_уроков': total_lessons_watched,
-                'общее_время_просмотра': total_time_watched if total_time_watched else 0,
-                'количество_учеников': total_users,
-                'процент_приобретения': acquisition_percentage
-            })
-        return JsonResponse({'product_stats': product_stats})
+@authentication_required
+def product_lesson_list(request, product_id):
+    user = request.user
+    lessons = Lesson.objects.filter(products__productaccess__user=user, products__id=product_id)
+    return render(request, 'product_lesson_list.html', {'lessons': lessons})
+
+
+@authentication_required
+def product_statistics(request):
+    user = request.user
+    products = Product.objects.annotate(
+        total_lessons=Count('lessons'),
+        total_students=Count('productaccess'),
+        total_views=Sum(Case(
+            When(lessons__lessonview__user=user, then=F('lessons__lessonview__viewing_time')),
+            default=Value(0),
+            output_field=IntegerField()
+        )),
+        purchase_percentage=Count('productaccess', filter=models.Q(productaccess__user=user)) / Count('productaccess')
+    )
+    return render(request, 'product_statistics.html', {'products': products})
+
+
+class Register(CreateView):
+    form_class = UserCreationForm
+    template_name = "register_for_salesman.html"
+    success_url = reverse_lazy("login")
+
+    def form_valid(self, form):
+        user = form.save()
+        user.is_staff = True
+        user.save()
+
+        login(self.request, user)
+        return redirect('for_salesman')
+
+
+class LoginUser(LoginView):
+    form_class = AuthenticationForm
+    template_name = "register_for_salesman.html"
+
+    def get_success_url(self):
+        return reverse_lazy("main")
