@@ -36,6 +36,10 @@ def product_lesson_list(request, product_id):
     return render(request, 'product_lesson_list.html', {'lessons': lessons})
 
 
+def main(request):
+    redirect('/')
+
+
 @authentication_required
 def product_statistics(request):
     user = request.user
@@ -54,8 +58,8 @@ def product_statistics(request):
 
 class Register(CreateView):
     form_class = UserCreationForm
-    template_name = "register_for_salesman.html"
-    success_url = reverse_lazy("login")
+    template_name = "register.html"
+    success_url = reverse_lazy("lessons")
 
     def form_valid(self, form):
         user = form.save()
@@ -66,9 +70,9 @@ class Register(CreateView):
         return redirect('for_salesman')
 
 
-class LoginUser(LoginView):
+class Login(LoginView):
     form_class = AuthenticationForm
-    template_name = "register_for_salesman.html"
+    template_name = "register.html"
 
     def get_success_url(self):
-        return reverse_lazy("main")
+        return reverse_lazy("lessons")
