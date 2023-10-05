@@ -3,6 +3,7 @@ from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 
 from django.db.models import Count, Sum, Case, When, F, Value, IntegerField
+from django.views.generic import CreateView
 
 from .models import *
 
@@ -45,3 +46,20 @@ def product_statistics(request):
         purchase_percentage=Count('productaccess', filter=models.Q(productaccess__user=user)) / Count('productaccess')
     )
     return render(request, 'product_statistics.html', {'products': products})
+
+class RegisterSalesman(CreateView):
+    form_class = UserCreationForm
+    template_name = "register_for_salesman.html"
+    success_url = reverse_lazy("login")
+
+    def form_valid(self, form):
+        user = form.save()
+        user.is_staff = True
+        group_reg = Group.objects.get(name='salesman')
+        user.groups.add(group_reg)
+        user.save()
+
+        login(self.request, user)
+        new_sale = Salesmans(id_user=user)
+        new_sale.save()
+        return redirect('for_salesman')
