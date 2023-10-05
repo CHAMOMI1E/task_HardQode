@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Список уроков по продукту</title>
+</head>
+<body>
+    <h1>Список уроков по продукту</h1>
+    <ul>
+        {% for lesson in lessons %}
+            <li>
+                {{ lesson.name }} - {{ lesson.lessonview_set.last.status }} ({{ lesson.lessonview_set.last.viewing_time }} секунд, {{ lesson.lessonview_set.last.created_at }})
+            </li>
+        {% endfor %}
+    </ul>
+</body>
+</html>
